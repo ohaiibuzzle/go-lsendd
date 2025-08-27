@@ -2,49 +2,47 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"time"
 
-	api_server "github.com/ohaiibuzzle/go-lsendd/api_server"
-	broadcast "github.com/ohaiibuzzle/go-lsendd/broadcast"
+	api_server "github.com/ohaiibuzzle/go-lsendd/internal/api_server"
+	broadcast "github.com/ohaiibuzzle/go-lsendd/internal/broadcast"
+	"github.com/ohaiibuzzle/go-lsendd/internal/config"
 )
 
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	result := make([]byte, length)
-	for i := range result {
-		result[i] = charset[i%len(charset)]
-	}
-	return string(result)
-}
-
 func main() {
-	var workdir string
-	flag.StringVar(&workdir, "wd", ".", "Working directory")
+	var config_file string
+	flag.StringVar(&config_file, "config", "/tmp/lsendd-config.json", "Path to configuration file")
 	flag.Parse()
 
-	// Set the working directory
-	if err := os.Chdir(workdir); err != nil {
-		log.Fatalf("Failed to change working directory: %v", err)
+	var cfg *config.Config
+
+	// Check if config file exists
+	if _, err := os.Stat(config_file); os.IsNotExist(err) {
+		cfg = config.NewConfig()
+	} else {
+		cfg = config.NewConfig()
+		if err := cfg.LoadFromFile(config_file); err != nil {
+			cfg = new(config.Config)
+		}
+	}
+
+	// Save config file once
+	if err := cfg.SaveToFile(config_file); err != nil {
+		log.Printf("Error saving config file: %v", err)
 	}
 
 	go api_server.StartAPIServer("0.0.0.0", 53317)
-
 	for {
-		// Generate a random 64-character string
-		fingerprint := generateRandomString(64)
-		broadcast.SetUniqueFingerprint(fingerprint)
+		broadcast.SetUniqueFingerprint(cfg.Fingerprint)
 
-		// Call the sendAnnouncement function
-		success, err := broadcast.SendAnnouncement("go-lsendd")
-		if err != nil {
-			fmt.Printf("Error sending announcement: %v\n", err)
-		}
-		if success {
-			fmt.Println("Announcement sent successfully!")
-		}
+		go func() {
+			_, err := broadcast.SendAnnouncement(cfg.AnnouncementName)
+			if err != nil {
+				log.Printf("Error sending announcement: %v", err)
+			}
+		}()
 
 		time.Sleep(10 * time.Second) // Wait for 10 seconds before sending the next announcement
 	}
